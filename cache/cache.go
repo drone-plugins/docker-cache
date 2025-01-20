@@ -27,7 +27,7 @@ type Rebuilder interface {
 // Restorer is an interface represents a restore action.
 type Restorer interface {
 	// Restore restores files from the cache provided with given paths.
-	Restore(srcs []string) error
+	Restore(srcs []string, cacheFileName string) error
 }
 
 // Flusher is an interface represents a flush action.
@@ -40,6 +40,10 @@ type cache struct {
 	Rebuilder
 	Restorer
 	Flusher
+}
+
+type CacheMetadata struct {
+	CacheSize string `json:"cache_size,omitempty"`
 }
 
 // New creates a new cache with given parameters.

@@ -1,8 +1,10 @@
 package cache
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -41,7 +43,7 @@ func NewRestorer(logger log.Logger, s storage.Storage, a archive.Archive, g key.
 }
 
 // Restore restores files from the cache provided with given paths.
-func (r restorer) Restore(dsts []string) error {
+func (r restorer) Restore(dsts []string, cacheFileName string) error {
 	level.Info(r.logger).Log("msg", "restoring cache")
 
 	now := time.Now()
@@ -94,7 +96,7 @@ func (r restorer) Restore(dsts []string) error {
 		go func(src, dst string) {
 			defer wg.Done()
 
-			if err := r.restore(src, dst); err != nil {
+			if err := r.restore(src, dst, cacheFileName); err != nil {
 				errs.Add(fmt.Errorf("download from <%s> to <%s>, %w", src, dst, err))
 			}
 		}(src, dst)
@@ -112,7 +114,7 @@ func (r restorer) Restore(dsts []string) error {
 }
 
 // restore fetches the archived file from the cache and restores to the host machine's file system.
-func (r restorer) restore(src, dst string) (err error) {
+func (r restorer) restore(src, dst, cacheFileName string) (err error) {
 	pr, pw := io.Pipe()
 	defer internal.CloseWithErrCapturef(&err, pr, "rebuild, pr close <%s>", dst)
 
@@ -138,6 +140,11 @@ func (r restorer) restore(src, dst string) (err error) {
 		}
 
 		return err
+	}
+
+	err = writeCacheMetadata(CacheMetadata{CacheSize: humanize.Bytes(uint64(written))}, cacheFileName)
+	if err != nil {
+		level.Error(r.logger).Log("msg", "writeCacheMetadata", "err", err)
 	}
 
 	level.Info(r.logger).Log("msg", "downloaded to local", "directory", dst, "cache size", humanize.Bytes(uint64(written)))
@@ -178,4 +185,24 @@ func getSeparator() string {
 	}
 
 	return "/"
+}
+
+func writeCacheMetadata(data CacheMetadata, filename string) error {
+	b, err := json.MarshalIndent(data, "", "\t")
+	if err != nil {
+		return fmt.Errorf("failed with err %s to marshal output %+v", err, data)
+	}
+
+	dir := filepath.Dir(filename)
+	err = os.MkdirAll(dir, 0644)
+	if err != nil {
+		return fmt.Errorf("failed with err %s to create %s directory for cache metrics file", err, dir)
+	}
+
+	err = os.WriteFile(filename, b, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write cache metrics to cache metrics file %s", filename)
+	}
+	fmt.Println("Successfully wrote to CacheMetadata file at", filename)
+	return nil
 }
